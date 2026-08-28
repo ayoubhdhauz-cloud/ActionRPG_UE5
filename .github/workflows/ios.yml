@@ -1,34 +1,61 @@
-name: Build ActionRPG UE5 IPA
+name: Build ActionRPG UE5 IPA - v2
 
 on:
   workflow_dispatch:
 
 env:
   UE_BRANCH: 5.3
+  GIT_TERMINAL_PROMPT: 0
 
 jobs:
   build:
+    name: Build iOS IPA
     runs-on: macos-14
     timeout-minutes: 360
 
     steps:
-      - name: Check starting disk space
+      - name: Workflow version
         run: |
+          echo "WORKFLOW_VERSION=ios-v2-no-generate-project-files"
+          echo "RUNNER_OS=$RUNNER_OS"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
           df -h /
 
       - name: Checkout game project
         uses: actions/checkout@v4
         with:
           path: game
+          fetch-depth: 1
 
       - name: Verify game project
+        shell: bash
         run: |
+          set -e
+
           test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
-          echo "Game project found:"
-          echo "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
+
+          echo "Project file:"
+          ls -lh "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
+
+          echo "Project directory:"
+          ls -la "$GITHUB_WORKSPACE/game"
+
+      - name: Check Xcode
+        shell: bash
+        run: |
+          set -e
+
+          xcode-select -p
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphonesimulator --show-sdk-path
 
       - name: Free safe-to-remove tools
+        shell: bash
         run: |
+          set -e
+
+          # ลบเฉพาะ tools ที่ไม่จำเป็นสำหรับ iOS
           sudo rm -rf /Users/runner/Library/Android/sdk || true
           sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/share/android-commandlinetools || true
@@ -36,22 +63,24 @@ jobs:
           sudo rm -rf /Users/runner/.cargo || true
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
 
-          # ห้ามลบ Xcode เพราะจำเป็นสำหรับ build iOS
-          echo "Xcode is intentionally kept"
-          xcode-select -p
-          xcodebuild -version
+          # ห้ามลบ Xcode
+          echo "Xcode is intentionally kept for iOS build"
 
           df -h /
 
-      - name: Clone Unreal Engine source
+      - name: Clone Unreal Engine
         shell: bash
         env:
           ENGINE_CLONE_PAT: ${{ secrets.ENGINE_CLONE_PAT }}
         run: |
+          set -e
+
           if [ -z "$ENGINE_CLONE_PAT" ]; then
-            echo "ENGINE_CLONE_PAT secret is missing"
+            echo "ERROR: ENGINE_CLONE_PAT secret is missing"
             exit 1
           fi
+
+          rm -rf "$RUNNER_TEMP/UnrealEngine"
 
           git clone \
             --depth 1 \
@@ -62,13 +91,18 @@ jobs:
           test -d "$RUNNER_TEMP/UnrealEngine"
 
           echo "Unreal Engine cloned successfully"
-          du -sh "$RUNNER_TEMP/UnrealEngine" || true
+          git -C "$RUNNER_TEMP/UnrealEngine" rev-parse --short HEAD
           df -h /
 
       - name: Setup Unreal Engine dependencies
         shell: bash
         run: |
+          set -e
           cd "$RUNNER_TEMP/UnrealEngine"
+
+          chmod +x Setup.sh || true
+          chmod +x Engine/Build/BatchFiles/RunUAT.sh || true
+          chmod +x Engine/Build/BatchFiles/Mac/Build.sh || true
 
           ./Setup.sh \
             --exclude=Win64 \
@@ -87,51 +121,56 @@ jobs:
 
           df -h /
 
-      - name: Generate Xcode project files
+      - name: Verify Unreal Build Tool
         shell: bash
         run: |
+          set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          # Unreal 5.3 บน macOS อาจ fail ตอนสร้าง VisualStudioMac
-          # แต่ Xcode project ถูกสร้างเสร็จแล้ว จึงปล่อยให้ workflow ทำงานต่อ
-          ./GenerateProjectFiles.sh || true
+          test -f "Engine/Build/BatchFiles/RunUAT.sh"
+          test -f "Engine/Build/BatchFiles/Mac/Build.sh"
 
-          test -f "UE5.xcodeproj/project.pbxproj"
-          test -d "UE5 (Mac).xcworkspace"
-          test -d "UE5 (IOS).xcworkspace"
-
-          echo "Xcode project files are ready"
-
-      - name: Verify generated Xcode files
-        shell: bash
-        run: |
-          cd "$RUNNER_TEMP/UnrealEngine"
-
-          test -f "UE5.xcodeproj/project.pbxproj"
-          test -d "UE5 (IOS).xcworkspace"
-
-          echo "Verified generated Xcode files"
+          echo "RunUAT.sh found"
+          echo "Build.sh found"
 
       - name: Build Unreal Editor
         shell: bash
         run: |
+          set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          xcodebuild \
-            -project UE5.xcodeproj \
-            -scheme UnrealEditor \
-            -configuration Development \
-            build
+          # ไม่ใช้ GenerateProjectFiles.sh
+          # Build.sh เรียก UnrealBuildTool โดยตรง
+          ./Engine/Build/BatchFiles/Mac/Build.sh \
+            UnrealEditor \
+            Mac \
+            Development
 
-      - name: Package game for iOS
+          echo "Unreal Editor build completed"
+          df -h /
+
+      - name: Build and package game for iOS
         shell: bash
         run: |
-          test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
-          test -f "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh"
+          set -e
+          cd "$RUNNER_TEMP/UnrealEngine"
 
-          "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh" \
+          PROJECT="$GITHUB_WORKSPACE/game/ActionRPG.uproject"
+          UAT="$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh"
+          OUTPUT="$RUNNER_TEMP/ipa_out"
+
+          test -f "$PROJECT"
+          test -f "$UAT"
+
+          mkdir -p "$OUTPUT"
+
+          "$UAT" \
             BuildCookRun \
-            -project="$GITHUB_WORKSPACE/game/ActionRPG.uproject" \
+            -project="$PROJECT" \
+            -noP4 \
+            -utf8output \
+            -unattended \
+            -nopause \
             -platform=IOS \
             -clientconfig=Development \
             -cook \
@@ -140,18 +179,41 @@ jobs:
             -package \
             -nosign \
             -archive \
-            -archivedirectory="$RUNNER_TEMP/ipa_out"
+            -archivedirectory="$OUTPUT"
 
-      - name: Show package output
+      - name: Inspect build output
         if: always()
+        shell: bash
         run: |
-          echo "Package files:"
-          find "$RUNNER_TEMP/ipa_out" -maxdepth 6 -type f 2>/dev/null || true
+          echo "Output directory:"
+          find "$RUNNER_TEMP/ipa_out" \
+            -maxdepth 8 \
+            -type f \
+            -print 2>/dev/null || true
 
+          echo ""
           echo "Disk space:"
           df -h /
 
-      - name: Upload IPA artifact
+      - name: Verify IPA exists
+        shell: bash
+        run: |
+          set -e
+
+          IPA_COUNT=$(find "$RUNNER_TEMP/ipa_out" \
+            -type f \
+            -name "*.ipa" \
+            | wc -l | tr -d ' ')
+
+          echo "IPA files found: $IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo "ERROR: No IPA file was generated"
+            find "$RUNNER_TEMP/ipa_out" -maxdepth 8 -type f || true
+            exit 1
+          fi
+
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: ActionRPG-unsigned-ipa
