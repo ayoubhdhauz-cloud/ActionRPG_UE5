@@ -9,7 +9,7 @@ env:
 jobs:
   build:
     runs-on: macos-14
-    timeout-minutes: 360   # max allowed on free GitHub Actions
+    timeout-minutes: 360
 
     steps:
       - name: Check starting disk space
@@ -20,21 +20,47 @@ jobs:
         with:
           path: game
 
-      - name: Free up disk space (remove unused preinstalled tools)
+      - name: Verify game project
         run: |
-          sudo rm -rf /Applications/Xcode_15.0.app /Applications/Xcode_15.1.app /Applications/Xcode_15.2.app || true
+          test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
+          echo "Game project found"
+
+      - name: Free safe-to-remove tools
+        run: |
           sudo rm -rf /Users/runner/Library/Android/sdk || true
           sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/share/android-commandlinetools || true
-          sudo rm -rf /Applications/Xcode_16*.app || true
           sudo rm -rf /Users/runner/.rustup /Users/runner/.cargo || true
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
+
+          # ห้ามลบ Xcode เพราะต้องใช้ build iOS
+          xcode-select -p
+          xcodebuild -version
           df -h /
 
-      - name: Run Setup.sh (Mac + iOS binaries only)
+      - name: Clone Unreal Engine source
+        env:
+          ENGINE_CLONE_PAT: ${{ secrets.ENGINE_CLONE_PAT }}
+        run: |
+          test -n "$ENGINE_CLONE_PAT" || {
+            echo "ENGINE_CLONE_PAT secret is missing"
+            exit 1
+          }
+
+          git clone \
+            --depth 1 \
+            --branch "${{ env.UE_BRANCH }}" \
+            "https://x-access-token:${ENGINE_CLONE_PAT}@github.com/EpicGames/UnrealEngine.git" \
+            "$RUNNER_TEMP/UnrealEngine"
+
+          test -d "$RUNNER_TEMP/UnrealEngine"
+          echo "Unreal Engine cloned successfully"
+          df -h /
+
+      - name: Run Setup.sh
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
-          df -h /
+
           ./Setup.sh \
             --exclude=Win64 \
             --exclude=Win32 \
@@ -49,56 +75,42 @@ jobs:
             --exclude=Switch \
             --exclude=HoloLens \
             --exclude=Lumin
-          df -h /
 
-      # -------------------------------------------------------------
-      # This is the step most likely to fail: Unreal Engine source is
-      # 50GB+. GitHub-hosted macOS runners typically have well under
-      # that much free space. We shallow-clone to minimize size, but
-      # this may still exceed what's available.
-      # -------------------------------------------------------------
-      - name: Clone Unreal Engine source (shallow)
-        env:
-          ENGINE_CLONE_PAT: ${{ secrets.ENGINE_CLONE_PAT }}
-        run: |
-          df -h /
-          git clone --depth 1 --branch ${{ env.UE_BRANCH }} \
-            https://${ENGINE_CLONE_PAT}@github.com/EpicGames/UnrealEngine.git \
-            "$RUNNER_TEMP/UnrealEngine"
-          df -h /
-
-      - name: Run Setup.sh (downloads binary dependencies)
-        run: |
-          cd "$RUNNER_TEMP/UnrealEngine"
-          ./Setup.sh
           df -h /
 
       - name: Generate project files
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
           ./GenerateProjectFiles.sh
+          test -f UE5.xcodeproj/project.pbxproj
 
-      - name: Build Unreal Editor (required before packaging)
+      - name: Build Unreal Editor
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
-          df -h /
-          xcodebuild -project UE5.xcodeproj -scheme UnrealEditor -configuration Development build
 
-      # -------------------------------------------------------------
-      # Package the game for iOS via Unreal Automation Tool (UAT).
-      # Unsigned/dev packaging - real device install still needs
-      # local re-signing (e.g. via Feather) same as previous projects.
-      # -------------------------------------------------------------
-      - name: Package for iOS (unsigned)
+          xcodebuild \
+            -project UE5.xcodeproj \
+            -scheme UnrealEditor \
+            -configuration Development \
+            build
+
+      - name: Package for iOS
         run: |
-          df -h /
-          "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun \
+          test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
+          test -f "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh"
+
+          "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh" \
+            BuildCookRun \
             -project="$GITHUB_WORKSPACE/game/ActionRPG.uproject" \
             -platform=IOS \
             -clientconfig=Development \
-            -cook -build -stage -package \
+            -cook \
+            -build \
+            -stage \
+            -package \
             -nosign \
-            -archive -archivedirectory="$RUNNER_TEMP/ipa_out"
+            -archive \
+            -archivedirectory="$RUNNER_TEMP/ipa_out"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
