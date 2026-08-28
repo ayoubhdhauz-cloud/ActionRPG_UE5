@@ -25,6 +25,30 @@ jobs:
           sudo rm -rf /Applications/Xcode_15.0.app /Applications/Xcode_15.1.app /Applications/Xcode_15.2.app || true
           sudo rm -rf /Users/runner/Library/Android/sdk || true
           sudo rm -rf /usr/local/lib/node_modules || true
+          sudo rm -rf /usr/local/share/android-commandlinetools || true
+          sudo rm -rf /Applications/Xcode_16*.app || true
+          sudo rm -rf /Users/runner/.rustup /Users/runner/.cargo || true
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
+          df -h /
+
+      - name: Run Setup.sh (Mac + iOS binaries only)
+        run: |
+          cd "$RUNNER_TEMP/UnrealEngine"
+          df -h /
+          ./Setup.sh \
+            --exclude=Win64 \
+            --exclude=Win32 \
+            --exclude=Android \
+            --exclude=Linux \
+            --exclude=LinuxArm64 \
+            --exclude=HTML5 \
+            --exclude=PS4 \
+            --exclude=PS5 \
+            --exclude=XboxOne \
+            --exclude=XSX \
+            --exclude=Switch \
+            --exclude=HoloLens \
+            --exclude=Lumin
           df -h /
 
       # -------------------------------------------------------------
