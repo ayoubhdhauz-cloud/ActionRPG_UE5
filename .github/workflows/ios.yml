@@ -1,4 +1,4 @@
-name: Build ActionRPG_UE5 IPA (Experimental)
+name: Build ActionRPG UE5 IPA
 
 on:
   workflow_dispatch:
@@ -13,7 +13,8 @@ jobs:
 
     steps:
       - name: Check starting disk space
-        run: df -h /
+        run: |
+          df -h /
 
       - name: Checkout game project
         uses: actions/checkout@v4
@@ -23,17 +24,20 @@ jobs:
       - name: Verify game project
         run: |
           test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
-          echo "Game project found"
+          echo "Game project found:"
+          echo "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
 
+      # อย่าลบ Xcode เพราะต้องใช้ xcodebuild สำหรับ iOS
       - name: Free safe-to-remove tools
         run: |
           sudo rm -rf /Users/runner/Library/Android/sdk || true
           sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/share/android-commandlinetools || true
-          sudo rm -rf /Users/runner/.rustup /Users/runner/.cargo || true
+          sudo rm -rf /Users/runner/.rustup || true
+          sudo rm -rf /Users/runner/.cargo || true
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
 
-          # ห้ามลบ Xcode เพราะต้องใช้ build iOS
+          echo "Xcode is intentionally kept"
           xcode-select -p
           xcodebuild -version
           df -h /
@@ -42,10 +46,10 @@ jobs:
         env:
           ENGINE_CLONE_PAT: ${{ secrets.ENGINE_CLONE_PAT }}
         run: |
-          test -n "$ENGINE_CLONE_PAT" || {
+          if [ -z "$ENGINE_CLONE_PAT" ]; then
             echo "ENGINE_CLONE_PAT secret is missing"
             exit 1
-          }
+          fi
 
           git clone \
             --depth 1 \
@@ -54,10 +58,13 @@ jobs:
             "$RUNNER_TEMP/UnrealEngine"
 
           test -d "$RUNNER_TEMP/UnrealEngine"
+
           echo "Unreal Engine cloned successfully"
+          du -sh "$RUNNER_TEMP/UnrealEngine" || true
           df -h /
 
-      - name: Run Setup.sh
+      - name: Setup Unreal Engine dependencies
+        shell: bash
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
 
@@ -78,13 +85,36 @@ jobs:
 
           df -h /
 
-      - name: Generate project files
+      - name: Generate Xcode project files
+        shell: bash
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
-          ./GenerateProjectFiles.sh
-          test -f UE5.xcodeproj/project.pbxproj
+
+          # Unreal 5.3 บน macOS อาจคืน exit code 1
+          # ตอนสร้าง VisualStudioMac project ทั้งที่ Xcode project สร้างสำเร็จแล้ว
+          status=0
+          ./GenerateProjectFiles.sh || status=$?
+
+          if [ "$status" -ne 0 ]; then
+            if grep -Fq \
+              "Unable to compute VC include paths on non-Windows host" \
+              Engine/Programs/UnrealBuildTool/Log_GPF.txt; then
+
+              echo "::warning::VisualStudioMac generation failed, but Xcode files were generated. Continuing."
+            else
+              echo "GenerateProjectFiles failed for an unexpected reason"
+              cat Engine/Programs/UnrealBuildTool/Log_GPF.txt || true
+              exit "$status"
+            fi
+          fi
+
+          test -f "UE5.xcodeproj/project.pbxproj"
+          test -d "UE5 (IOS).xcworkspace"
+
+          echo "Xcode project files are ready"
 
       - name: Build Unreal Editor
+        shell: bash
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
 
@@ -94,7 +124,8 @@ jobs:
             -configuration Development \
             build
 
-      - name: Package for iOS
+      - name: Package game for iOS
+        shell: bash
         run: |
           test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
           test -f "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh"
@@ -112,8 +143,18 @@ jobs:
             -archive \
             -archivedirectory="$RUNNER_TEMP/ipa_out"
 
+      - name: Show package output
+        if: always()
+        run: |
+          echo "Package files:"
+          find "$RUNNER_TEMP/ipa_out" -maxdepth 5 -type f 2>/dev/null || true
+
+          echo "Disk space:"
+          df -h /
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: ActionRPG-unsigned-ipa
           path: ${{ runner.temp }}/ipa_out/**/*.ipa
+          if-no-files-found: error
