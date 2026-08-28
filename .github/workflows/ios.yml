@@ -1,4 +1,4 @@
-name: Build ActionRPG UE5 IPA - v2
+name: Build ActionRPG UE5 IPA - v3
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Workflow version
         run: |
-          echo "WORKFLOW_VERSION=ios-v2-no-generate-project-files"
+          echo "WORKFLOW_VERSION=ios-v3-ubt-bootstrap"
           echo "RUNNER_OS=$RUNNER_OS"
           echo "RUNNER_ARCH=$RUNNER_ARCH"
           df -h /
@@ -34,11 +34,8 @@ jobs:
 
           test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
 
-          echo "Project file:"
+          echo "Game project:"
           ls -lh "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
-
-          echo "Project directory:"
-          ls -la "$GITHUB_WORKSPACE/game"
 
       - name: Check Xcode
         shell: bash
@@ -101,6 +98,7 @@ jobs:
           cd "$RUNNER_TEMP/UnrealEngine"
 
           chmod +x Setup.sh || true
+          chmod +x GenerateProjectFiles.sh || true
           chmod +x Engine/Build/BatchFiles/RunUAT.sh || true
           chmod +x Engine/Build/BatchFiles/Mac/Build.sh || true
 
@@ -121,17 +119,48 @@ jobs:
 
           df -h /
 
-      - name: Verify Unreal Build Tool
+      - name: Bootstrap UnrealBuildTool
         shell: bash
         run: |
           set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          test -f "Engine/Build/BatchFiles/RunUAT.sh"
-          test -f "Engine/Build/BatchFiles/Mac/Build.sh"
+          echo "Bootstrapping UnrealBuildTool..."
 
-          echo "RunUAT.sh found"
-          echo "Build.sh found"
+          status=0
+          ./GenerateProjectFiles.sh || status=$?
+
+          if [ "$status" -ne 0 ]; then
+            if grep -Fq \
+              "Unable to compute VC include paths on non-Windows host" \
+              Engine/Programs/UnrealBuildTool/Log_GPF.txt; then
+
+              echo "::warning::VisualStudioMac generation failed, but continuing because Xcode files and UnrealBuildTool were generated."
+            else
+              echo "GenerateProjectFiles failed for an unexpected reason"
+              cat Engine/Programs/UnrealBuildTool/Log_GPF.txt || true
+              exit "$status"
+            fi
+          fi
+
+          test -f \
+            "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+
+          echo "UnrealBuildTool is ready"
+          ls -lh \
+            "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+
+      - name: Verify generated Xcode files
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP/UnrealEngine"
+
+          test -f "UE5.xcodeproj/project.pbxproj"
+          test -d "UE5 (Mac).xcworkspace"
+          test -d "UE5 (IOS).xcworkspace"
+
+          echo "Xcode project files are ready"
 
       - name: Build Unreal Editor
         shell: bash
@@ -139,8 +168,6 @@ jobs:
           set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          # ไม่ใช้ GenerateProjectFiles.sh
-          # Build.sh เรียก UnrealBuildTool โดยตรง
           ./Engine/Build/BatchFiles/Mac/Build.sh \
             UnrealEditor \
             Mac \
@@ -149,7 +176,7 @@ jobs:
           echo "Unreal Editor build completed"
           df -h /
 
-      - name: Build and package game for iOS
+      - name: Package game for iOS
         shell: bash
         run: |
           set -e
@@ -185,7 +212,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "Output directory:"
+          echo "Build output:"
           find "$RUNNER_TEMP/ipa_out" \
             -maxdepth 8 \
             -type f \
@@ -209,7 +236,9 @@ jobs:
 
           if [ "$IPA_COUNT" -eq 0 ]; then
             echo "ERROR: No IPA file was generated"
-            find "$RUNNER_TEMP/ipa_out" -maxdepth 8 -type f || true
+            find "$RUNNER_TEMP/ipa_out" \
+              -maxdepth 8 \
+              -type f || true
             exit 1
           fi
 
