@@ -27,7 +27,6 @@ jobs:
           echo "Game project found:"
           echo "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
 
-      # อย่าลบ Xcode เพราะต้องใช้ xcodebuild สำหรับ iOS
       - name: Free safe-to-remove tools
         run: |
           sudo rm -rf /Users/runner/Library/Android/sdk || true
@@ -37,12 +36,15 @@ jobs:
           sudo rm -rf /Users/runner/.cargo || true
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
 
+          # ห้ามลบ Xcode เพราะจำเป็นสำหรับ build iOS
           echo "Xcode is intentionally kept"
           xcode-select -p
           xcodebuild -version
+
           df -h /
 
       - name: Clone Unreal Engine source
+        shell: bash
         env:
           ENGINE_CLONE_PAT: ${{ secrets.ENGINE_CLONE_PAT }}
         run: |
@@ -90,28 +92,25 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          # Unreal 5.3 บน macOS อาจคืน exit code 1
-          # ตอนสร้าง VisualStudioMac project ทั้งที่ Xcode project สร้างสำเร็จแล้ว
-          status=0
-          ./GenerateProjectFiles.sh || status=$?
+          # Unreal 5.3 บน macOS อาจ fail ตอนสร้าง VisualStudioMac
+          # แต่ Xcode project ถูกสร้างเสร็จแล้ว จึงปล่อยให้ workflow ทำงานต่อ
+          ./GenerateProjectFiles.sh || true
 
-          if [ "$status" -ne 0 ]; then
-            if grep -Fq \
-              "Unable to compute VC include paths on non-Windows host" \
-              Engine/Programs/UnrealBuildTool/Log_GPF.txt; then
+          test -f "UE5.xcodeproj/project.pbxproj"
+          test -d "UE5 (Mac).xcworkspace"
+          test -d "UE5 (IOS).xcworkspace"
 
-              echo "::warning::VisualStudioMac generation failed, but Xcode files were generated. Continuing."
-            else
-              echo "GenerateProjectFiles failed for an unexpected reason"
-              cat Engine/Programs/UnrealBuildTool/Log_GPF.txt || true
-              exit "$status"
-            fi
-          fi
+          echo "Xcode project files are ready"
+
+      - name: Verify generated Xcode files
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/UnrealEngine"
 
           test -f "UE5.xcodeproj/project.pbxproj"
           test -d "UE5 (IOS).xcworkspace"
 
-          echo "Xcode project files are ready"
+          echo "Verified generated Xcode files"
 
       - name: Build Unreal Editor
         shell: bash
@@ -147,7 +146,7 @@ jobs:
         if: always()
         run: |
           echo "Package files:"
-          find "$RUNNER_TEMP/ipa_out" -maxdepth 5 -type f 2>/dev/null || true
+          find "$RUNNER_TEMP/ipa_out" -maxdepth 6 -type f 2>/dev/null || true
 
           echo "Disk space:"
           df -h /
