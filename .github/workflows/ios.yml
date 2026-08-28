@@ -1,4 +1,4 @@
-name: Build ActionRPG UE5 IPA - v3
+name: Build ActionRPG UE5 IPA - v4
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Workflow version
         run: |
-          echo "WORKFLOW_VERSION=ios-v3-ubt-bootstrap"
+          echo "WORKFLOW_VERSION=ios-v4-no-xcode-path-check"
           echo "RUNNER_OS=$RUNNER_OS"
           echo "RUNNER_ARCH=$RUNNER_ARCH"
           df -h /
@@ -34,7 +34,7 @@ jobs:
 
           test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
 
-          echo "Game project:"
+          echo "Game project found:"
           ls -lh "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
 
       - name: Check Xcode
@@ -52,7 +52,6 @@ jobs:
         run: |
           set -e
 
-          # ลบเฉพาะ tools ที่ไม่จำเป็นสำหรับ iOS
           sudo rm -rf /Users/runner/Library/Android/sdk || true
           sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/share/android-commandlinetools || true
@@ -61,7 +60,7 @@ jobs:
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
 
           # ห้ามลบ Xcode
-          echo "Xcode is intentionally kept for iOS build"
+          echo "Xcode is intentionally kept"
 
           df -h /
 
@@ -135,9 +134,10 @@ jobs:
               "Unable to compute VC include paths on non-Windows host" \
               Engine/Programs/UnrealBuildTool/Log_GPF.txt; then
 
-              echo "::warning::VisualStudioMac generation failed, but continuing because Xcode files and UnrealBuildTool were generated."
+              echo "::warning::VisualStudioMac generation failed."
+              echo "::warning::UnrealBuildTool was generated, continuing."
             else
-              echo "GenerateProjectFiles failed for an unexpected reason"
+              echo "GenerateProjectFiles failed unexpectedly"
               cat Engine/Programs/UnrealBuildTool/Log_GPF.txt || true
               exit "$status"
             fi
@@ -150,17 +150,22 @@ jobs:
           ls -lh \
             "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
 
-      - name: Verify generated Xcode files
+      - name: Verify UnrealBuildTool
         shell: bash
         run: |
           set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          test -f "UE5.xcodeproj/project.pbxproj"
-          test -d "UE5 (Mac).xcworkspace"
-          test -d "UE5 (IOS).xcworkspace"
+          test -f \
+            "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
 
-          echo "Xcode project files are ready"
+          test -f \
+            "Engine/Build/BatchFiles/Mac/Build.sh"
+
+          test -f \
+            "Engine/Build/BatchFiles/RunUAT.sh"
+
+          echo "Required Unreal build tools are ready"
 
       - name: Build Unreal Editor
         shell: bash
