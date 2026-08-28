@@ -1,0 +1,83 @@
+name: Build ActionRPG_UE5 IPA (Experimental)
+
+on:
+  workflow_dispatch:
+
+env:
+  UE_BRANCH: 5.3
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 360   # max allowed on free GitHub Actions
+
+    steps:
+      - name: Check starting disk space
+        run: df -h /
+
+      - name: Checkout game project
+        uses: actions/checkout@v4
+        with:
+          path: game
+
+      - name: Free up disk space (remove unused preinstalled tools)
+        run: |
+          sudo rm -rf /Applications/Xcode_15.0.app /Applications/Xcode_15.1.app /Applications/Xcode_15.2.app || true
+          sudo rm -rf /Users/runner/Library/Android/sdk || true
+          sudo rm -rf /usr/local/lib/node_modules || true
+          df -h /
+
+      # -------------------------------------------------------------
+      # This is the step most likely to fail: Unreal Engine source is
+      # 50GB+. GitHub-hosted macOS runners typically have well under
+      # that much free space. We shallow-clone to minimize size, but
+      # this may still exceed what's available.
+      # -------------------------------------------------------------
+      - name: Clone Unreal Engine source (shallow)
+        env:
+          ENGINE_CLONE_PAT: ${{ secrets.ENGINE_CLONE_PAT }}
+        run: |
+          df -h /
+          git clone --depth 1 --branch ${{ env.UE_BRANCH }} \
+            https://${ENGINE_CLONE_PAT}@github.com/EpicGames/UnrealEngine.git \
+            "$RUNNER_TEMP/UnrealEngine"
+          df -h /
+
+      - name: Run Setup.sh (downloads binary dependencies)
+        run: |
+          cd "$RUNNER_TEMP/UnrealEngine"
+          ./Setup.sh
+          df -h /
+
+      - name: Generate project files
+        run: |
+          cd "$RUNNER_TEMP/UnrealEngine"
+          ./GenerateProjectFiles.sh
+
+      - name: Build Unreal Editor (required before packaging)
+        run: |
+          cd "$RUNNER_TEMP/UnrealEngine"
+          df -h /
+          xcodebuild -project UE5.xcodeproj -scheme UnrealEditor -configuration Development build
+
+      # -------------------------------------------------------------
+      # Package the game for iOS via Unreal Automation Tool (UAT).
+      # Unsigned/dev packaging - real device install still needs
+      # local re-signing (e.g. via Feather) same as previous projects.
+      # -------------------------------------------------------------
+      - name: Package for iOS (unsigned)
+        run: |
+          df -h /
+          "$RUNNER_TEMP/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun \
+            -project="$GITHUB_WORKSPACE/game/ActionRPG.uproject" \
+            -platform=IOS \
+            -clientconfig=Development \
+            -cook -build -stage -package \
+            -nosign \
+            -archive -archivedirectory="$RUNNER_TEMP/ipa_out"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ActionRPG-unsigned-ipa
+          path: ${{ runner.temp }}/ipa_out/**/*.ipa
