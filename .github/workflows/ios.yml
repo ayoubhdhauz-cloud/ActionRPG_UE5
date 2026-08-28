@@ -1,4 +1,4 @@
-name: Build ActionRPG UE5 IPA - v4
+name: Build ActionRPG UE5 IPA - v5
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Workflow version
         run: |
-          echo "WORKFLOW_VERSION=ios-v4-no-xcode-path-check"
+          echo "WORKFLOW_VERSION=ios-v5-freedisk"
           echo "RUNNER_OS=$RUNNER_OS"
           echo "RUNNER_ARCH=$RUNNER_ARCH"
           df -h /
@@ -31,9 +31,7 @@ jobs:
         shell: bash
         run: |
           set -e
-
           test -f "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
-
           echo "Game project found:"
           ls -lh "$GITHUB_WORKSPACE/game/ActionRPG.uproject"
 
@@ -41,27 +39,49 @@ jobs:
         shell: bash
         run: |
           set -e
-
           xcode-select -p
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
           xcrun --sdk iphonesimulator --show-sdk-path
 
-      - name: Free safe-to-remove tools
+      - name: Free disk space
         shell: bash
         run: |
           set -e
 
+          echo "=== Disk before ==="
+          df -h /
+
+          # Android
           sudo rm -rf /Users/runner/Library/Android/sdk || true
-          sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/share/android-commandlinetools || true
+          sudo rm -rf /usr/local/share/android-sdk || true
+
+          # Node / npm
+          sudo rm -rf /usr/local/lib/node_modules || true
+          sudo rm -rf /usr/local/share/npm || true
+
+          # Rust
           sudo rm -rf /Users/runner/.rustup || true
           sudo rm -rf /Users/runner/.cargo || true
+
+          # Simulators
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
+
+          # Boost, PowerShell, dotnet, Haskell
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/.ghcup || true
+
+          # GitHub Actions tool cache
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
 
           # ห้ามลบ Xcode
           echo "Xcode is intentionally kept"
 
+          echo "=== Disk after ==="
           df -h /
 
       - name: Clone Unreal Engine
@@ -84,8 +104,6 @@ jobs:
             "https://x-access-token:${ENGINE_CLONE_PAT}@github.com/EpicGames/UnrealEngine.git" \
             "$RUNNER_TEMP/UnrealEngine"
 
-          test -d "$RUNNER_TEMP/UnrealEngine"
-
           echo "Unreal Engine cloned successfully"
           git -C "$RUNNER_TEMP/UnrealEngine" rev-parse --short HEAD
           df -h /
@@ -96,10 +114,10 @@ jobs:
           set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          chmod +x Setup.sh || true
-          chmod +x GenerateProjectFiles.sh || true
-          chmod +x Engine/Build/BatchFiles/RunUAT.sh || true
-          chmod +x Engine/Build/BatchFiles/Mac/Build.sh || true
+          chmod +x Setup.sh
+          chmod +x GenerateProjectFiles.sh
+          chmod +x Engine/Build/BatchFiles/RunUAT.sh
+          chmod +x Engine/Build/BatchFiles/Mac/Build.sh
 
           ./Setup.sh \
             --exclude=Win64 \
@@ -133,9 +151,7 @@ jobs:
             if grep -Fq \
               "Unable to compute VC include paths on non-Windows host" \
               Engine/Programs/UnrealBuildTool/Log_GPF.txt; then
-
-              echo "::warning::VisualStudioMac generation failed."
-              echo "::warning::UnrealBuildTool was generated, continuing."
+              echo "::warning::VisualStudioMac generation failed — expected, continuing."
             else
               echo "GenerateProjectFiles failed unexpectedly"
               cat Engine/Programs/UnrealBuildTool/Log_GPF.txt || true
@@ -143,12 +159,9 @@ jobs:
             fi
           fi
 
-          test -f \
-            "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
-
+          test -f "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
           echo "UnrealBuildTool is ready"
-          ls -lh \
-            "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+          ls -lh "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
 
       - name: Verify UnrealBuildTool
         shell: bash
@@ -156,14 +169,9 @@ jobs:
           set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          test -f \
-            "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
-
-          test -f \
-            "Engine/Build/BatchFiles/Mac/Build.sh"
-
-          test -f \
-            "Engine/Build/BatchFiles/RunUAT.sh"
+          test -f "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+          test -f "Engine/Build/BatchFiles/Mac/Build.sh"
+          test -f "Engine/Build/BatchFiles/RunUAT.sh"
 
           echo "Required Unreal build tools are ready"
 
@@ -179,6 +187,15 @@ jobs:
             Development
 
           echo "Unreal Editor build completed"
+          df -h /
+
+      - name: Clean intermediates after build
+        shell: bash
+        run: |
+          echo "=== Freeing space after editor build ==="
+          rm -rf "$RUNNER_TEMP/UnrealEngine/Engine/Intermediate" || true
+          rm -rf "$RUNNER_TEMP/UnrealEngine/Engine/Saved" || true
+          rm -rf "$RUNNER_TEMP/UnrealEngine/Engine/DerivedDataCache" || true
           df -h /
 
       - name: Package game for iOS
@@ -241,9 +258,7 @@ jobs:
 
           if [ "$IPA_COUNT" -eq 0 ]; then
             echo "ERROR: No IPA file was generated"
-            find "$RUNNER_TEMP/ipa_out" \
-              -maxdepth 8 \
-              -type f || true
+            find "$RUNNER_TEMP/ipa_out" -maxdepth 8 -type f || true
             exit 1
           fi
 
