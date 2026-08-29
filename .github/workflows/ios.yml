@@ -1,10 +1,10 @@
-name: Build ActionRPG UE5 IPA - v5
+name: Build ActionRPG UE4 IPA - v1
 
 on:
   workflow_dispatch:
 
 env:
-  UE_BRANCH: 5.3
+  UE_BRANCH: 4.27
   GIT_TERMINAL_PROMPT: 0
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Workflow version
         run: |
-          echo "WORKFLOW_VERSION=ios-v5-freedisk"
+          echo "WORKFLOW_VERSION=ios-ue4-v1"
           echo "RUNNER_OS=$RUNNER_OS"
           echo "RUNNER_ARCH=$RUNNER_ARCH"
           df -h /
@@ -52,35 +52,22 @@ jobs:
           echo "=== Disk before ==="
           df -h /
 
-          # Android
           sudo rm -rf /Users/runner/Library/Android/sdk || true
           sudo rm -rf /usr/local/share/android-commandlinetools || true
           sudo rm -rf /usr/local/share/android-sdk || true
-
-          # Node / npm
           sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/share/npm || true
-
-          # Rust
           sudo rm -rf /Users/runner/.rustup || true
           sudo rm -rf /Users/runner/.cargo || true
-
-          # Simulators
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/*.simruntime || true
-
-          # Boost, PowerShell, dotnet, Haskell
           sudo rm -rf /usr/local/share/boost || true
           sudo rm -rf /usr/local/share/powershell || true
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /opt/ghc || true
           sudo rm -rf /usr/local/.ghcup || true
-
-          # GitHub Actions tool cache
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
 
-          # ห้ามลบ Xcode
           echo "Xcode is intentionally kept"
-
           echo "=== Disk after ==="
           df -h /
 
@@ -159,9 +146,9 @@ jobs:
             fi
           fi
 
-          test -f "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+          test -f "Engine/Binaries/DotNET/UnrealBuildTool.exe"
           echo "UnrealBuildTool is ready"
-          ls -lh "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+          ls -lh "Engine/Binaries/DotNET/UnrealBuildTool.exe"
 
       - name: Verify UnrealBuildTool
         shell: bash
@@ -169,7 +156,7 @@ jobs:
           set -e
           cd "$RUNNER_TEMP/UnrealEngine"
 
-          test -f "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll"
+          test -f "Engine/Binaries/DotNET/UnrealBuildTool.exe"
           test -f "Engine/Build/BatchFiles/Mac/Build.sh"
           test -f "Engine/Build/BatchFiles/RunUAT.sh"
 
@@ -182,7 +169,7 @@ jobs:
           cd "$RUNNER_TEMP/UnrealEngine"
 
           ./Engine/Build/BatchFiles/Mac/Build.sh \
-            UnrealEditor \
+            UE4Editor \
             Mac \
             Development
 
