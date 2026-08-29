@@ -1,4 +1,4 @@
-name: Build ActionRPG UE4 IPA - v1
+name: Build ActionRPG UE4 IPA - v2
 
 on:
   workflow_dispatch:
@@ -10,13 +10,13 @@ env:
 jobs:
   build:
     name: Build iOS IPA
-    runs-on: macos-13
+    runs-on: macos-13  # ← Xcode 14.x compatible กับ UE 4.27
     timeout-minutes: 360
 
     steps:
       - name: Workflow version
         run: |
-          echo "WORKFLOW_VERSION=ios-ue4-v1"
+          echo "WORKFLOW_VERSION=ios-ue4-v2-macos13"
           echo "RUNNER_OS=$RUNNER_OS"
           echo "RUNNER_ARCH=$RUNNER_ARCH"
           df -h /
